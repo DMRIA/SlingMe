@@ -1,0 +1,261 @@
+# Slingshot Rental – Agents Architecture
+
+Last updated: 2025-12-10  
+Owner: Devin Mausia  
+
+This document is the source of truth for all AI agents in the Slingshot Rental / SlingMe ecosystem:
+
+- Which agents exist and what they own.
+- Which tools (Convex, GitHub, gcloud) they can call.
+- Handoffs between agents.
+- Guardrails and safety policies.
+
+It is written assuming:
+- Web app: Next.js + React + TypeScript + Convex.
+- Agents service: separate service using the OpenAI Agents SDK.
+- Dev environment: Google Antigravity with missions that orchestrate these agents.
+
+---
+
+## 1. Agents Overview
+
+Agents (by ID):
+
+- `booking_concierge` – helps end users book Slingshots.
+- `pricing_optimizer` – tunes pricing rules.
+- `fleet_ops` – manages vehicles and maintenance.
+- `support` – handles support questions and reviews.
+- `gcloud_agent` – plans Google Cloud deployment changes.
+- `github_agent` – manages repo branches, PRs, releases.
+- `founder_copilot` – internal builder for Devin (orchestrates others).
+
+Each agent has:
+
+- A prompt file in `/prompts/*.llm.txt`.
+- A code implementation in the agents service (e.g., `agents/*.py`).
+- A toolset (Convex functions + external APIs).
+- Guardrails.
+
+---
+
+## 2. Core Agents (Product-Facing)
+
+### 2.1 Booking Concierge (`booking_concierge`)
+
+**Role**  
+Conversational booking assistant. Turns natural language into rentals.
+
+**Key responsibilities**
+
+- Understand user intent: date, time, duration, number of people.
+- Filter vehicles by preferences (color, transmission, location).
+- Present availability options.
+- Create bookings (after explicit confirmation).
+- Explain pricing.
+
+**Convex tools**
+
+- `convex.getAvailability(vehicle_filters, date_range)`
+- `convex.getQuote(vehicle_id, start_time, end_time, discount_code?)`
+- `convex.createRental(user_id, vehicle_id, start_time, end_time, price_quote_id)`
+- `convex.getUserRentals(user_id)`
+- `convex.getWaiverStatus(user_id)`
+
+**Handoffs**
+
+- To `pricing_optimizer` when:
+  - User asks “best time for cheapest price” / dynamic pricing questions.
+- To `support` when:
+  - The user asks about refunds, cancellations beyond standard flows, or policy disputes.
+
+**Guardrails**
+
+- Validate:
+  - User age / license eligibility (based on Convex data).
+  - Time ranges (`start_time < end_time`).
+- Never:
+  - Charge payments directly (only orchestrate booking state and return instructions to frontend).
+- Output format (suggested):
+  - JSON with:
+    - `ui_summary`: human-readable description.
+    - `actions`: list of action objects, e.g. `{ type: "SHOW_OPTIONS", options: [...] }`.
+
+---
+
+### 2.2 Pricing Optimizer (`pricing_optimizer`)
+
+**Role**  
+Analyze rental history and adjust pricing rules.
+
+**Convex tools**
+
+- `convex.fetchRecentRentals(window_days)`
+- `convex.listPricingRules(filters)`
+- `convex.updatePricingRule(rule_id, new_rule)`
+- `convex.logPricingDecision(old_rules, new_rules, rationale)`
+
+**Guardrails**
+
+- All price changes must:
+  - Respect global min/max bounds.
+  - Be logged.
+- Large price jumps (e.g., > 20% on popular slots) should be returned as a plan requiring human approval.
+
+---
+
+### 2.3 Fleet Ops (`fleet_ops`)
+
+**Role**  
+Help ops manage vehicles and maintenance.
+
+**Convex tools**
+
+- `convex.listVehicles(filters)`
+- `convex.updateVehicleStatus(vehicle_id, status)`
+- `convex.blockAvailability(vehicle_id, date_range, reason)`
+- `convex.listMaintenanceEvents(filters)`
+- `convex.createMaintenanceEvent(vehicle_id, scheduled_at, type)`
+
+**Handoffs**
+
+- To `support` to notify affected bookings.
+- To `booking_concierge` for alternative vehicle suggestions.
+
+---
+
+### 2.4 Support (`support`)
+
+**Role**  
+Support agent for policies, tickets, and reviews.
+
+**Convex tools**
+
+- `convex.getRental(rental_id)`
+- `convex.getReviews(filters)`
+- `convex.createSupportTicket(user_id, category, message)`
+- `convex.createReview(rental_id, rating, comment?)`
+
+**Guardrails**
+
+- Must not:
+  - Promise refunds outside configured policies.
+- Should:
+  - Create tickets and escalate for complex cases.
+
+---
+
+## 3. Infra & Dev Agents
+
+### 3.1 gcloud Agent (`gcloud_agent`)
+
+**Role**  
+Plan Google Cloud Run deployments and configuration changes.  
+It outputs commands and YAML, but does **not** execute arbitrary shell commands by itself.
+
+**Typical tasks**
+
+- Suggest `gcloud run deploy` commands.
+- Propose Cloud Run service definitions.
+- Generate GitHub Actions snippets to deploy to Cloud Run.
+
+**Tools**
+
+- `gcloud_safe.list_projects()`
+- `gcloud_safe.list_cloud_run_services(project_id, region)`
+- `gcloud_safe.generate_cloud_run_deploy_plan(service_name, source_or_image, region, env_keys)`
+- `gcloud_safe.generate_github_action_for_cloud_run(service_name, repo, branch_triggers)`
+
+**Guardrails**
+
+- No destructive actions.
+- Never returns real secrets.
+- Always uses a “plan first, then approve” pattern.
+
+---
+
+### 3.2 GitHub Agent (`github_agent`)
+
+**Role**  
+Manage repo structure, branches, PRs, and releases via the GitHub API.
+
+**Typical tasks**
+
+- Create branches.
+- Open PRs.
+- Add labels.
+- Draft releases & changelog entries.
+
+**Tools**
+
+- `github_api.create_branch(base, name)`
+- `github_api.open_pull_request(title, body, base, head)`
+- `github_api.add_labels_to_pr(pr_number, labels)`
+- `github_api.create_release(tag, title, notes)`
+- `repo_maintenance.update_file(path, patch_or_new_content)`
+
+**Guardrails**
+
+- No force pushes.
+- No secret files.
+- All non-trivial changes go through PRs targeting `dev` or `main`.
+
+---
+
+### 3.3 Founder Copilot (`founder_copilot`)
+
+**Role**  
+Internal “super-agent” for Devin that:
+
+- Understands the whole project.
+- Delegates to `github_agent`, `gcloud_agent`, and product agents.
+- Operates inside Antigravity with strict repo boundaries.
+
+**Tools**
+
+- Delegation to other agents.
+- File read / diff suggestion (within repo only).
+- Running non-destructive commands in a controlled terminal (with explicit approval).
+
+**Guardrails**
+
+- Confined to project folders.
+- No system-wide destructive commands.
+- Must present a plan before large refactors.
+
+---
+
+## 4. Prompt Files
+
+Each agent has a prompt file in `/prompts`:
+
+- `prompts/booking_agent.llm.txt`
+- `prompts/pricing_agent.llm.txt`
+- `prompts/fleet_ops_agent.llm.txt`
+- `prompts/support_agent.llm.txt`
+- `prompts/gcloud_agent.llm.txt`
+- `prompts/github_agent.llm.txt`
+- `prompts/founder_copilot.llm.txt` (optional; may live in agents repo)
+
+Recommended sections in each:
+
+1. ROLE
+2. GOALS
+3. TOOLS
+4. POLICIES
+5. HANDOFF RULES
+6. OUTPUT FORMAT
+7. EXAMPLES
+
+---
+
+## 5. Integration Points
+
+- Web app calls the agents service over HTTP:
+  - `/agents/booking/run`
+  - `/agents/support/run`
+  - `/agents/gcloud/run`
+  - `/agents/github/run`
+- Convex functions are exposed to agents as tools via a small `convex_client` wrapper in the agents repo.
+- Antigravity missions orchestrate multi-step tasks using Founder Copilot + these agents.
+
+This document should be updated alongside code changes and kept in sync by the GitHub Agent.

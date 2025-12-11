@@ -1,0 +1,133 @@
+# Slingshot Rental – Google Cloud Deployment Plan
+
+Last updated: 2025-12-10  
+Owner: Platform / DevOps (Devin)
+
+We deploy two Cloud Run services:
+
+1. `slingshot-web` – Next.js frontend + API routes.
+2. `slingshot-agents` – OpenAI Agents SDK service.
+
+Environments:
+- `dev` – development.
+- `prod` – production.
+
+---
+
+## 1. Projects & Regions
+
+Suggested GCP projects:
+
+- `slingshot-dev-<id>` – dev.
+- `slingshot-prod-<id>` – prod.
+
+Suggested region:
+
+- `us-central1` (can change later).
+
+Each project has:
+
+- Cloud Run enabled.
+- Artifact Registry (if using container builds).
+- IAM + Workload Identity Federation for GitHub.
+
+---
+
+## 2. Services
+
+### 2.1 `slingshot-web`
+
+- Source: SlingMe web repo (Next.js + Convex client).
+- Deployed to Cloud Run:
+  - Initially via source-based deploy (`gcloud run deploy --source=.`).
+  - Later via pre-built image.
+
+### 2.2 `slingshot-agents`
+
+- Source: `slingshot-agents` repo.
+- Containerized (Dockerfile).
+- Deployed to Cloud Run using container image in Artifact Registry.
+
+---
+
+## 3. Manual Bootstrap (one-time)
+
+Once GCP projects are created and APIs enabled:
+
+1. `gcloud config set project slingshot-dev-<id>`
+2. `gcloud run deploy slingshot-web --source=. --region=us-central1 --allow-unauthenticated`
+3. Build & deploy `slingshot-agents` via:
+   - `gcloud builds submit --tag <image-url>`
+   - `gcloud run deploy slingshot-agents --image=<image-url> --region=us-central1 --no-allow-unauthenticated`
+
+Record service URLs here:
+
+- Dev web URL: `https://slingshot-web-dev-...run.app`
+- Dev agents URL: `https://slingshot-agents-dev-...run.app`
+- Prod web URL: `...`
+- Prod agents URL: `...`
+
+---
+
+## 4. CI/CD with GitHub Actions
+
+Use three workflows in `.github/workflows`:
+
+- `web-ci.yml` – lint, typecheck, tests.
+- `web-deploy-cloudrun.yml` – deploy `slingshot-web`.
+- `agents-deploy.yml` – deploy `slingshot-agents`.
+
+Authentication:
+
+- Prefer Workload Identity Federation between GitHub and GCP.
+- Store project IDs, region, and pool info as GitHub environment secrets.
+
+Deployment rules:
+
+- `dev`:
+  - Trigger: push to `dev` branch.
+  - Environment: `dev`.
+- `prod`:
+  - Trigger: push to `main` or tagged release.
+  - Environment: `prod` with manual approval.
+
+---
+
+## 5. Environment Variables & Secrets
+
+Common:
+
+- `CONVEX_URL`
+- `CONVEX_DEPLOYMENT`
+- `GCLOUD_PROJECT`
+- `GCLOUD_REGION`
+
+Web-only:
+
+- `NEXT_PUBLIC_CONVEX_URL`
+- `NEXT_PUBLIC_APP_ENV`
+
+Agents-only:
+
+- `OPENAI_API_KEY`
+- `GITHUB_TOKEN` or GitHub App credentials.
+
+Secrets are stored in:
+
+- Cloud Run service configuration (env vars).
+- GitHub environment secrets (for CI/CD).
+
+---
+
+## 6. gcloud Agent Interface
+
+The `gcloud_agent` uses this document to:
+
+- Generate `gcloud run deploy` commands.
+- Propose GitHub Actions YAML for Cloud Run deploy jobs.
+- Inspect current services and suggest changes.
+
+It must always:
+
+- Output a plan; never directly execute commands.
+- Avoid destructive changes.

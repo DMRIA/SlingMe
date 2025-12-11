@@ -1,0 +1,51 @@
+name: Deploy slingshot-web (Cloud Run)
+
+on:
+  push:
+    branches: [dev, main]
+
+env:
+  SERVICE_NAME: slingshot-web
+  REGION: us-central1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select dev config
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          echo "GCP_PROJECT=${{ secrets.GCP_PROJECT_DEV }}" >> $GITHUB_ENV
+          echo "IDENTITY_PROVIDER=${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER_DEV }}" >> $GITHUB_ENV
+          echo "SERVICE_ACCOUNT=${{ secrets.GCP_SERVICE_ACCOUNT_DEV }}" >> $GITHUB_ENV
+
+      - name: Select prod config
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "GCP_PROJECT=${{ secrets.GCP_PROJECT_PROD }}" >> $GITHUB_ENV
+          echo "IDENTITY_PROVIDER=${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER_PROD }}" >> $GITHUB_ENV
+          echo "SERVICE_ACCOUNT=${{ secrets.GCP_SERVICE_ACCOUNT_PROD }}" >> $GITHUB_ENV
+
+      - name: Auth to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+
+      - name: Deploy to Cloud Run (source-based)
+        run: |
+          gcloud config set project "${GCP_PROJECT}"
+          gcloud run deploy "${SERVICE_NAME}" \
+            --source=. \
+            --region="${REGION}" \
+            --allow-unauthenticated \
+            --quiet

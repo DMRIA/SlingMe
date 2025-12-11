@@ -1,0 +1,126 @@
+# Slingshot Rental – GitHub Workflow & CI/CD
+
+Last updated: 2025-12-10  
+Owner: Platform / DevOps (Devin)
+
+This document defines:
+
+- Branching model.
+- Pull request rules.
+- GitHub Actions workflows.
+- How the GitHub Agent should behave.
+
+---
+
+## 1. Branching Model
+
+- `main` – production branch; always deployable.
+- `dev` – integration branch.
+- `feature/*` – feature branches, created from `dev`.
+
+Optional release branches later:
+
+- `release/vX.Y.Z` – for stabilizing releases.
+
+---
+
+## 2. Pull Requests
+
+- Feature → `dev`.
+- `dev` → `main` for releases.
+
+Requirements for most PRs:
+
+- CI green (lint, typecheck, tests when available).
+- At least one approved review.
+- No direct pushes to `main` except emergencies (and those should still be PRs when possible).
+
+Commit message convention (suggested):
+
+- `feat: ...`
+- `fix: ...`
+- `chore: ...`
+- `docs: ...`
+- `infra: ...`
+
+---
+
+## 3. GitHub Actions Workflows
+
+All under `.github/workflows/`:
+
+### 3.1 `web-ci.yml`
+
+Purpose: basic CI for web/Convex code.
+
+- Trigger: `pull_request` to `dev` or `main`, optional `push` to those branches.
+- Jobs:
+  - Checkout code.
+  - Install dependencies (later).
+  - Run `npm run lint`.
+  - Run `npm run typecheck`.
+  - Run tests when they exist.
+
+### 3.2 `web-deploy-cloudrun.yml`
+
+Purpose: deploy `slingshot-web` to Cloud Run.
+
+- Trigger:
+  - Push to `dev` → deploy to `dev` environment.
+  - Push to `main` → deploy to `prod` environment.
+- Steps:
+  - Checkout repo.
+  - Authenticate to GCP (Workload Identity Federation).
+  - Build/deploy:
+    - Either via Cloud Run GitHub Action or `gcloud run deploy`.
+
+### 3.3 `agents-deploy.yml`
+
+Purpose: deploy `slingshot-agents` service.
+
+- Trigger:
+  - Push to `main` in the agents repo, or tags `agents-v*`.
+- Steps:
+  - Checkout repo.
+  - Authenticate to GCP.
+  - Build Docker image.
+  - Push to Artifact Registry.
+  - Deploy Cloud Run service.
+
+---
+
+## 4. Environments
+
+Use GitHub environments:
+
+- `dev` – for dev deployments.
+- `prod` – for production.
+
+Each environment:
+
+- Has its own secrets (GCP project, region, etc.).
+- May require approvals for deployment (especially `prod`).
+
+---
+
+## 5. GitHub Agent Behavior
+
+The `github_agent` is allowed to:
+
+- Create branches from `dev` or `main`.
+- Open PRs with clear titles and bodies.
+- Add labels to PRs (`feature`, `infra`, `release`, etc.).
+- Propose changes to files like:
+  - `docs/*.mdc`
+  - `.github/workflows/*.yml`
+
+It is **not** allowed to:
+
+- Force-push.
+- Delete branches without explicit instruction.
+- Commit secrets.
+
+It should always:
+
+- Prefer PRs over direct commits.
+- Keep docs and workflows in sync with implementation changes.
