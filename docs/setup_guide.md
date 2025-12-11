@@ -11,6 +11,10 @@ Navigate to your repository's **Settings > Secrets and variables > Actions** and
 | `GCP_WORKLOAD_IDENTITY_PROVIDER_PROD` | WIF Provider Resource Name | `projects/456.../locations/global/workloadIdentityPools/...` |
 | `GCP_SERVICE_ACCOUNT_DEV` | Service Account Email | `github-deploy@slingme-dev.iam.gserviceaccount.com` |
 | `GCP_SERVICE_ACCOUNT_PROD` | Service Account Email | `github-deploy@slingme-prod.iam.gserviceaccount.com` |
+| `NEXT_PUBLIC_SITE_URL` | Production URL | `https://slingshot-web-xyz.a.run.app` |
+| `NEXT_PUBLIC_CONVEX_URL` | Convex Prod URL | `https://happy-otter-123.convex.cloud` |
+| `CONVEX_DEPLOYMENT` | Convex Prod Deployment Name | `prod:happy-otter-123` |
+| `RESEND_API_KEY` | Resend API Key for Emails | `re_123456...` |
 
 ## GCP Configuration requirements
 For each project (Dev/Prod):

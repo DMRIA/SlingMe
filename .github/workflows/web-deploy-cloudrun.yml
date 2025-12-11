@@ -48,4 +48,5 @@ jobs:
             --source=. \
             --region="${REGION}" \
             --allow-unauthenticated \
+            --set-env-vars "NEXT_PUBLIC_SITE_URL=${{ secrets.NEXT_PUBLIC_SITE_URL }},NEXT_PUBLIC_CONVEX_URL=${{ secrets.NEXT_PUBLIC_CONVEX_URL }},CONVEX_DEPLOYMENT=${{ secrets.CONVEX_DEPLOYMENT }},RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" \
             --quiet
