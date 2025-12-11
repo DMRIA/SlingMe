@@ -162,7 +162,7 @@ export default function BookingPage({ params }: { params: { vehicleId: string } 
                                 Request to Book
                             </button>
                             <p className="text-center text-xs text-gray-500 mt-4">
-                                You won't be charged until the booking is confirmed.
+                                You won&apos;t be charged until the booking is confirmed.
                             </p>
                         </div>
                     </form>
